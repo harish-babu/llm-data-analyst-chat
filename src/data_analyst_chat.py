@@ -8,7 +8,8 @@ from utils_llm import chat_with_data_api
 
 def chat_with_data():
 
-    st.title("Chat with, query and plot your own data")
+    st.set_page_config(page_title="LLM Data Genie", page_icon="🧞")
+    st.title("🧞 LLM Data Genie: Chat with, query and plot your own data")
 
     with st.sidebar:
         model_params = sidebar()
@@ -28,11 +29,8 @@ def chat_with_data():
     uploaded_file = st.file_uploader(label="Choose file", type=["csv"])
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-        prompt = f"""You are a python expert. You will be given questions for
-            manipulating an input dataframe.
-            The available columns are: `{df.columns}`.
-            Use them for extracting the relevant data.
-        """
+        # Seed the system prompts
+        prompt = f"""You are a python expert. You will be given questions for manipulating an input dataframe. The available columns are: `{df.columns}`. Use them for extracting the relevant data. """
         if "messages" not in st.session_state:
             st.session_state["messages"] = [{"role": "system", "content": prompt}]
     else:
@@ -45,12 +43,6 @@ def chat_with_data():
     if "past" not in st.session_state:
         st.session_state["past"] = []
 
-    user_input = get_text()
-
-    if ((len(st.session_state["past"]) > 0)
-            and (user_input == st.session_state["past"][-1])):
-        user_input = ""
-
     if ("messages" in st.session_state) and \
             (len(st.session_state["messages"]) > 2 * memory_window):
         # Keep only the system prompt and the last `memory_window` prompts/answers
@@ -60,11 +52,23 @@ def chat_with_data():
             + st.session_state["messages"][-(2 * memory_window - 2):]
         )
 
+    if 'messages' in st.session_state:
+        for msg in st.session_state.messages:
+            st.chat_message(msg["role"]).write(msg["content"])
+
+    user_input = get_text()
+
+    # Check whether the new input is same as the last input.  If yes, ignore this new input.
+    if ((len(st.session_state["past"]) > 0)
+            and (user_input == st.session_state["past"][-1])):
+        user_input = ""
+
     if user_input:
         if df.empty:
             st.warning("Dataframe is empty, upload a valid file", icon="⚠️")
         else:
             st.session_state["messages"].append({"role": "user", "content": user_input})
+            st.chat_message('user').write(user_input)
             response = chat_with_data_api(df, **model_params)
             st.session_state.past.append(user_input)
             if response is not None:
@@ -72,15 +76,15 @@ def chat_with_data():
                 st.session_state["messages"].append(
                     {"role": "assistant", "content": response})
 
-    if st.session_state["generated"]:
-        for i in range(len(st.session_state["generated"]) - 1, -1, -1):
-            message(st.session_state["generated"][i], key=str(i))
-            if i - 1 >= 0:
-                message(
-                    st.session_state["past"][i - 1],
-                    is_user=True,
-                    key=str(i) + "_user"
-                )
+    # if st.session_state["generated"]:
+    #     for i in range(len(st.session_state["generated"]) - 1, -1, -1):
+    #         message(st.session_state["generated"][i], key=str(i))
+    #         if i - 1 >= 0:
+    #             message(
+    #                 st.session_state["past"][i - 1],
+    #                 is_user=True,
+    #                 key=str(i) + "_user"
+    #             )
 
 
 if __name__ == "__main__":

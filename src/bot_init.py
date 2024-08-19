@@ -13,9 +13,8 @@ MAX_LENGTH_MODEL_DICT = {
 
 def get_text():
     """Input text by the user"""
-    input_text = st.text_input(
-        label="Ask me your question.",
-        value="",
+    input_text = st.chat_input(
+        placeholder="What data analysis do you want?",
         key="input"
     )
     return input_text

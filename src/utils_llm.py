@@ -8,6 +8,8 @@ from langchain.chat_models import ChatOpenAI
 from langchain.agents import AgentType
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.schema.output_parser import OutputParserException
+from langchain.callbacks import StreamlitCallbackHandler
+
 
 if os.environ.get('OPENAI_API_KEY') is not None:
     openai.api_key = os.environ['OPENAI_API_KEY']
@@ -92,33 +94,37 @@ def chat_with_data_api(df, model="gpt-4o", temperature=0.0, max_tokens=4096, top
     if any(keyword in st.session_state.messages[-1]["content"].lower() for keyword in ["plot", "graph", "draw", "chart"]):
         code_prompt = """
                     Generate the code <code> for plotting the previous data in plotly, in the format requested. The solution should be given using plotly and only plotly. Do NOT use matplotlib.  Usage of matplotlib, matplotlib.pyplot are forbidden. Return the code <code> in the following format ```python <code>```
-                    """        
-        st.session_state.messages.append({
+                    """     
+        # Do not add the above code_prompt to the session state.  It affects the future code generation steps also.  Hence avoid adding it.   
+        step_prompts = st.session_state.messages.copy()
+        step_prompts.append({
             "role": "assistant",
             "content": code_prompt
         })
         response = client.chat.completions.create(
             model=model,
-            messages=st.session_state.messages,
+            messages=step_prompts,
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
         )
         code = extract_python_code(response.choices[0].message.content)
-        if code is None:
-            st.warning(
-                "Couldn't find data to plot in the chat. "
-                "Check if the number of tokens is too low for the data at hand. "
-                "I.e. if the generated code is cut off, this might be the case.",
-                icon="🚨"
-            )
-            return "Couldn't plot the data"
-        else:
-            code = code.replace("fig.show()", "")
-            code += """st.plotly_chart(fig, theme='streamlit', use_container_width=True)"""  # noqa: E501
-            st.write(f"```{code}")
-            exec(code)
-            return response.choices[0].message.content
+        with st.chat_message('assistant'):
+            if code is None:
+                st.warning(
+                    "Couldn't find data to plot in the chat. "
+                    "Check if the number of tokens is too low for the data at hand. "
+                    "I.e. if the generated code is cut off, this might be the case.",
+                    icon="🚨"
+                )
+                return "Couldn't plot the data"
+            else:
+                code = code.replace("fig.show()", "")
+                code += """st.plotly_chart(fig, theme='streamlit', use_container_width=True)"""  # noqa: E501
+                st.write(f"```{code}")
+                exec(code)
+                return "Complete."
+                # return response.choices[0].message.content
     else:
         llm = ChatOpenAI(
             model=model,
@@ -137,16 +143,21 @@ def chat_with_data_api(df, model="gpt-4o", temperature=0.0, max_tokens=4096, top
             allow_dangerous_code=True,
         )
 
+        print(st.session_state.messages)
         try:
-            answer = pandas_df_agent(st.session_state.messages)
-            if answer["intermediate_steps"]:
-                action = answer["intermediate_steps"][-1][0].tool_input["query"]
-                st.write(f"Executed the code ```{action}```")
-            return answer["output"]
+            stCBHandler = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
+            with st.chat_message('assistant'):
+                answer = pandas_df_agent(st.session_state.messages, callbacks=[stCBHandler])
+                if answer["intermediate_steps"]:
+                    action = answer["intermediate_steps"][-1][0].tool_input["query"]
+                    with st.status("Executed the code."):
+                        st.write(f"```{action}```")
+                st.write(answer['output'])
+                return answer["output"]
         except OutputParserException:
             error_msg = """OutputParserException error occured in LangChain agent.
                 Refine your query."""
             return error_msg
         except:  # noqa: E722
-            answer = "Unknown error occured in LangChain agent. Refine your query"
+            error_msg = "Unknown error occured in LangChain agent. Refine your query"
             return error_msg
